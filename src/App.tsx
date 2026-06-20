@@ -8,7 +8,21 @@ import { WORKERS, FACES, getWorker, getFace } from './targets'
 // Tabs: Chat · Code · Diagnose · Health · Config
 // ============================================================
 
-const SVC_KEY = import.meta.env.VITE_ELLE_SERVICE_KEY || ''
+// Auth: per-user JWT obtained at runtime via /api/elle-auth (Login screen below).
+// No service key in the bundle. Token persists in localStorage (30-day expiry).
+const ELLE_AUTH_URL = WORKERS.find(w => w.key === 'elle-worker')!.url + '/api/elle-auth'
+let TOKEN = localStorage.getItem('elle_dev_jwt') || ''
+let USER_EMAIL = localStorage.getItem('elle_dev_email') || ''
+function setAuth(token: string, email: string) {
+  TOKEN = token; USER_EMAIL = email
+  localStorage.setItem('elle_dev_jwt', token)
+  localStorage.setItem('elle_dev_email', email)
+}
+function clearAuth() {
+  TOKEN = ''; USER_EMAIL = ''
+  localStorage.removeItem('elle_dev_jwt')
+  localStorage.removeItem('elle_dev_email')
+}
 
 type Tab = 'chat' | 'code' | 'diagnose' | 'health' | 'config'
 
@@ -33,12 +47,63 @@ input,textarea,select,button{font-family:inherit}
 
 function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36) }
 
+// ── LOGIN — per-user JWT (replaces the old build-time service key) ──
+function Login({ onAuth }: { onAuth: () => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [errMsg, setErrMsg] = useState('')
+
+  const submit = async () => {
+    if (busy || !email.trim() || !pw) return
+    setBusy(true); setErrMsg('')
+    try {
+      const r = await fetch(ELLE_AUTH_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: mode, email: email.trim().toLowerCase(), password: pw }),
+      })
+      const d = await r.json()
+      if (!r.ok || !d.access_token) throw new Error(d.error || `HTTP ${r.status}`)
+      setAuth(d.access_token as string, (d.user?.email as string) || email.trim())
+      onAuth()
+    } catch (e: any) { setErrMsg(String(e.message || e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--void)' }}>
+      <div style={{ width: 320, padding: 24, background: 'var(--base)', border: '0.5px solid var(--b1)', borderRadius: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+          <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--void)', border: '1px solid #5FD6E855', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: '#5FD6E8' }}>A</div>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600 }}>elle atlas</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: '#5FD6E8' }}>dev</span>
+        </div>
+        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email" autoComplete="username"
+          style={{ width: '100%', background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '9px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none', marginBottom: 8 }} />
+        <input value={pw} onChange={e => setPw(e.target.value)} type="password" placeholder="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          onKeyDown={e => { if (e.key === 'Enter') submit() }}
+          style={{ width: '100%', background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '9px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none', marginBottom: 12 }} />
+        <button onClick={submit} disabled={busy || !email.trim() || !pw}
+          style={{ width: '100%', padding: '9px 0', borderRadius: 6, border: '0.5px solid #5FD6E855', background: '#5FD6E822', color: '#5FD6E8', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12, marginBottom: 10 }}>
+          {busy ? '…' : mode === 'login' ? 'sign in' : 'create account'}
+        </button>
+        {errMsg && <div style={{ color: '#e07070', fontFamily: 'var(--mono)', fontSize: 10.5, marginBottom: 10, whiteSpace: 'pre-wrap' }}>{errMsg}</div>}
+        <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setErrMsg('') }}
+          style={{ width: '100%', background: 'none', border: 'none', color: 'var(--t3)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10.5 }}>
+          {mode === 'login' ? 'need an account? sign up' : 'have an account? sign in'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [accent, setAccent] = useState('#5FD6E8')
   const [workerKey, setWorkerKey] = useState('elle-worker')
   const [faceKey, setFaceKey] = useState('main')
   const [tab, setTab] = useState<Tab>('chat')
   const [health, setHealth] = useState<Record<string, any>>({})
+  const [authed, setAuthed] = useState(!!TOKEN)
 
   const worker = getWorker(workerKey)
   const face = getFace(faceKey)
@@ -67,6 +132,8 @@ export default function App() {
     check(); const iv = setInterval(check, 30000)
     return () => { alive = false; clearInterval(iv) }
   }, [])
+
+  if (!authed) return <Login onAuth={() => setAuthed(true)} />
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--void)' }}>
@@ -162,7 +229,7 @@ function ChatPanel({ worker, face, accent }: any) {
     try {
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(isRapid ? {} : { Authorization: `Bearer ${SVC_KEY}` }) },
+        headers: { 'Content-Type': 'application/json', ...(isRapid ? {} : { Authorization: `Bearer ${TOKEN}` }) },
         body: JSON.stringify(body),
       })
       const d = await r.json()
@@ -223,7 +290,7 @@ function CodePanel({ worker, accent }: any) {
     if (loading) return; setLoading(true); setOut('')
     try {
       const r = await fetch(worker.url + '/api/elle-code-engine', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SVC_KEY}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
         body: JSON.stringify({ action, code, task, use_corpus: true }),
       })
       const d = await r.json()
@@ -260,7 +327,7 @@ function DiagnosePanel({ worker, accent }: any) {
     if (loading || !err.trim()) return; setLoading(true); setOut('')
     try {
       const r = await fetch(worker.url + '/api/diagnose', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SVC_KEY}` },
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
         body: JSON.stringify({ error: err }),
       })
       const d = await r.json()
@@ -316,9 +383,13 @@ function ConfigPanel({ worker, face, accent }: any) {
       {row('kind', worker.kind)}
       {row('face', face.label)}
       {row('face page', face.page)}
-      {row('service key', SVC_KEY ? '••• set' : '✗ not set')}
+      {row('auth', USER_EMAIL ? 'JWT · ' + USER_EMAIL : 'not signed in')}
+      <button onClick={() => { clearAuth(); location.reload() }}
+        style={{ marginTop: 16, padding: '6px 14px', borderRadius: 5, border: '0.5px solid var(--b1)', background: 'var(--raised)', color: 'var(--t2)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11 }}>
+        sign out
+      </button>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t4)', marginTop: 20, lineHeight: 1.7 }}>
-        Set VITE_ELLE_SERVICE_KEY in the Pages project env vars to authenticate against elle-worker endpoints (code engine, conversation, diagnose).
+        Auth is a per-user JWT from /api/elle-auth — no service key in this bundle. Calls to elle-worker (conversation, code engine) send your Bearer token; diagnose and health are public.
       </div>
     </div>
   )
