@@ -30,7 +30,7 @@ export const WORKERS: WorkerTarget[] = [
 
 export const FACES: FaceTarget[] = [
   { key: 'main',    label: 'main · core',   page: 'https://eip.pages.dev',       worker: 'elle-worker', accent: '#5FD6E8' },
-  { key: 'law',     label: 'law · Anubis',  page: 'https://elle-law.pages.dev',   worker: 'elle-worker', accent: '#C9A84C' },
+  { key: 'law',     label: 'law · Anubis',  page: 'https://anubislaw.pages.dev',   worker: 'elle-worker', accent: '#C9A84C' },
   { key: 'edu',     label: 'edu · Atlas',   page: 'https://atlasedu.pages.dev',       worker: 'elle-worker', accent: '#4ADE80' },
   { key: 'rapid',   label: 'rapid · Atlas', page: 'https://rapidai.pages.dev/coo/', worker: 'rapid2ai-ai', accent: '#22D3EE' },
   { key: 'madmind', label: 'madmind',       page: 'https://madmind.pages.dev',       worker: 'elle-worker', accent: '#A78BFA' },
