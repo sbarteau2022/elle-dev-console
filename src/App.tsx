@@ -24,7 +24,7 @@ function clearAuth() {
   localStorage.removeItem('elle_dev_email')
 }
 
-type Tab = 'chat' | 'code' | 'diagnose' | 'health' | 'config'
+type Tab = 'chat' | 'ask' | 'corpus' | 'code' | 'diagnose' | 'health' | 'config'
 
 interface Msg { id: string; role: 'user' | 'elle'; content: string; thinking?: string; meta?: string; ts: number; err?: boolean }
 
@@ -183,7 +183,7 @@ export default function App() {
 
       {/* ── Tabs ── */}
       <div style={{ height: 36, flexShrink: 0, borderBottom: '0.5px solid var(--b1)', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 4, background: 'var(--base)' }}>
-        {(['chat','code','diagnose','health','config'] as Tab[]).map(tb => (
+        {(['chat','ask','corpus','code','diagnose','health','config'] as Tab[]).map(tb => (
           <button key={tb} onClick={() => setTab(tb)}
             style={{ padding: '5px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11,
               background: tab === tb ? accent + '1a' : 'transparent', color: tab === tb ? accent : 'var(--t3)',
@@ -196,6 +196,8 @@ export default function App() {
       {/* ── Panel ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         {tab === 'chat'     && <ChatPanel worker={worker} face={face} accent={accent} />}
+        {tab === 'ask'      && <AskPanel worker={worker} accent={accent} />}
+        {tab === 'corpus'   && <CorpusPanel worker={worker} accent={accent} />}
         {tab === 'code'     && <CodePanel worker={worker} accent={accent} />}
         {tab === 'diagnose' && <DiagnosePanel worker={worker} accent={accent} />}
         {tab === 'health'   && <HealthPanel health={health} accent={accent} />}
@@ -318,6 +320,137 @@ function CodePanel({ worker, accent }: any) {
 }
 
 // ── DIAGNOSE ──────────────────────────────────────────────────
+// ── ASK (natural-language router over every capability) ───────
+function AskPanel({ worker, accent }: any) {
+  const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [answer, setAnswer] = useState('')
+  const [trace, setTrace] = useState<any[]>([])
+  const [openTrace, setOpenTrace] = useState(true)
+  const [note, setNote] = useState('')
+
+  const ask = async () => {
+    if (loading || !q.trim()) return; setLoading(true); setAnswer(''); setTrace([]); setNote('')
+    try {
+      const r = await fetch(worker.url + '/api/elle-router', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({ q }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.error) { setNote(d.error || `HTTP ${r.status}`); return }
+      setAnswer(d.answer || '(no answer)'); setTrace(d.trace || [])
+    } catch (e: any) { setNote('Error: ' + (e.message || e)) } finally { setLoading(false) }
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 14, gap: 10, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') ask() }}
+          placeholder="ask anything — corpus, trades, the dream sweep, invoices, the live web… she picks the tools"
+          style={{ flex: 1, background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '10px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
+        <button onClick={ask} disabled={loading || !q.trim()}
+          style={{ padding: '6px 16px', borderRadius: 5, border: `0.5px solid ${accent}55`, background: accent + '22', color: accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}>{loading ? 'thinking…' : 'ask ▸'}</button>
+      </div>
+      {note && <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--t3)' }}>{note}</div>}
+      <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {answer && (
+          <div style={{ background: 'var(--base)', border: '0.5px solid var(--b1)', borderRadius: 6, padding: 14, fontSize: 12.5, color: 'var(--t1)', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{answer}</div>
+        )}
+        {trace.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button onClick={() => setOpenTrace(!openTrace)}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10.5, cursor: 'pointer', padding: 0 }}>
+              {(openTrace ? '▾ ' : '▸ ') + trace.length + ' tool step' + (trace.length === 1 ? '' : 's')}
+            </button>
+            {openTrace && trace.map((t: any, i: number) => (
+              <div key={i} style={{ background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)' }}>
+                <div style={{ color: accent, marginBottom: 3 }}>{(i + 1) + '. ' + t.tool}<span style={{ color: 'var(--t3)' }}>{'  ' + JSON.stringify(t.args)}</span></div>
+                <div style={{ whiteSpace: 'pre-wrap', color: 'var(--t3)', lineHeight: 1.5 }}>{String(t.result || '')}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!answer && trace.length === 0 && !note && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 11, textAlign: 'center', padding: 20 }}>
+            one question · she reaches the corpus, D1, the live web, the code engine, trading, and RAPID²AI — and cross-references across them
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── CORPUS (natural-language paper retrieval) ─────────────────
+function CorpusPanel({ worker, accent }: any) {
+  const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [cands, setCands] = useState<any[]>([])
+  const [paper, setPaper] = useState<any>(null)
+  const [note, setNote] = useState('')
+
+  const open = async (id: string) => {
+    setLoading(true); setNote('')
+    try {
+      const r = await fetch(worker.url + '/api/corpus-paper', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({ id }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.error) { setNote(d.error || `HTTP ${r.status}`); return }
+      setPaper(d.paper); setCands([])
+    } catch (e: any) { setNote('Error: ' + (e.message || e)) } finally { setLoading(false) }
+  }
+
+  const resolve = async () => {
+    if (loading || !q.trim()) return; setLoading(true); setPaper(null); setCands([]); setNote('')
+    try {
+      const r = await fetch(worker.url + '/api/corpus-resolve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({ q }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.error) { setNote(d.error || `HTTP ${r.status}`); return }
+      if (d.auto_opened && d.paper) setPaper(d.paper)
+      else if (d.candidates?.length) { setCands(d.candidates); setNote('Several papers match — pick one:') }
+      else setNote('No paper matched that. Try describing it differently.')
+    } catch (e: any) { setNote('Error: ' + (e.message || e)) } finally { setLoading(false) }
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 14, gap: 10, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') resolve() }}
+          placeholder="describe the paper in plain English — e.g. the proof that the golden ratio is forced…"
+          style={{ flex: 1, background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '10px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
+        <button onClick={resolve} disabled={loading || !q.trim()}
+          style={{ padding: '6px 16px', borderRadius: 5, border: `0.5px solid ${accent}55`, background: accent + '22', color: accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}>{loading ? 'finding…' : 'find ▸'}</button>
+      </div>
+      {note && <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--t3)' }}>{note}</div>}
+      {cands.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {cands.map(c => (
+            <button key={c.id} onClick={() => open(c.id)}
+              style={{ textAlign: 'left', background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, padding: '8px 12px', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11.5 }}>
+              <span style={{ color: accent }}>{c.title || '(untitled)'}</span>
+              <span style={{ color: 'var(--t3)' }}>{'  · ' + (c.series || '—') + ' · ' + c.score}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {paper && (
+        <div style={{ flex: 1, overflow: 'auto', background: 'var(--base)', border: '0.5px solid var(--b1)', borderRadius: 6, padding: 14 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: accent, marginBottom: 2 }}>{paper.title}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t3)', marginBottom: 12 }}>{(paper.series || '—') + (paper.word_count ? ' · ' + paper.word_count + ' words' : '')}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--t2)', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{paper.full_text || paper.abstract || '(no text)'}</div>
+        </div>
+      )}
+      {!paper && cands.length === 0 && !note && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 11 }}>ask for any paper in the corpus — no ids, no JSON</div>
+      )}
+    </div>
+  )
+}
+
 function DiagnosePanel({ worker, accent }: any) {
   const [err, setErr] = useState('')
   const [out, setOut] = useState('')
