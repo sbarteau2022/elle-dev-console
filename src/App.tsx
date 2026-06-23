@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { WORKERS, FACES, getWorker, getFace } from './targets'
+import EllePanel from './EllePanel'
+import OptimusPanel from './OptimusPanel'
 
 // ============================================================
 // ELLE ATLAS — DEV CONSOLE
@@ -24,7 +26,7 @@ function clearAuth() {
   localStorage.removeItem('elle_dev_email')
 }
 
-type Tab = 'chat' | 'ask' | 'corpus' | 'code' | 'diagnose' | 'health' | 'config'
+type Tab = 'elle' | 'optimus' | 'code' | 'diagnose' | 'health' | 'config'
 
 interface Msg { id: string; role: 'user' | 'elle'; content: string; thinking?: string; meta?: string; ts: number; err?: boolean }
 
@@ -101,7 +103,7 @@ export default function App() {
   const [accent, setAccent] = useState('#5FD6E8')
   const [workerKey, setWorkerKey] = useState('elle-worker')
   const [faceKey, setFaceKey] = useState('main')
-  const [tab, setTab] = useState<Tab>('chat')
+  const [tab, setTab] = useState<Tab>('elle')
   const [health, setHealth] = useState<Record<string, any>>({})
   const [authed, setAuthed] = useState(!!TOKEN)
 
@@ -183,7 +185,7 @@ export default function App() {
 
       {/* ── Tabs ── */}
       <div style={{ height: 36, flexShrink: 0, borderBottom: '0.5px solid var(--b1)', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 4, background: 'var(--base)' }}>
-        {(['chat','ask','corpus','code','diagnose','health','config'] as Tab[]).map(tb => (
+        {(['elle','optimus','code','diagnose','health','config'] as Tab[]).map(tb => (
           <button key={tb} onClick={() => setTab(tb)}
             style={{ padding: '5px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11,
               background: tab === tb ? accent + '1a' : 'transparent', color: tab === tb ? accent : 'var(--t3)',
@@ -195,9 +197,8 @@ export default function App() {
 
       {/* ── Panel ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-        {tab === 'chat'     && <ChatPanel worker={worker} face={face} accent={accent} />}
-        {tab === 'ask'      && <AskPanel worker={worker} accent={accent} />}
-        {tab === 'corpus'   && <CorpusPanel worker={worker} accent={accent} />}
+        {tab === 'elle'     && <EllePanel worker={worker} accent={accent} />}
+        {tab === 'optimus'  && <OptimusPanel worker={worker} accent={accent} />}
         {tab === 'code'     && <CodePanel worker={worker} accent={accent} />}
         {tab === 'diagnose' && <DiagnosePanel worker={worker} accent={accent} />}
         {tab === 'health'   && <HealthPanel health={health} accent={accent} />}
