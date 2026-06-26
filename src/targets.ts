@@ -25,7 +25,7 @@ export interface FaceTarget {
 export const WORKERS: WorkerTarget[] = [
   { key: 'elle-worker',     label: 'elle-worker',      url: 'https://elle-worker.sbarteau2022.workers.dev',      health: '/health',  kind: 'elle'  },
   { key: 'rapid2ai-ai',     label: 'rapid2ai-ai',      url: 'https://rapid2ai-ai-worker.sbarteau2022.workers.dev', health: '/health', kind: 'rapid' },
-  { key: 'rapid2ai-ingest', label: 'rapid2ai-ingest',  url: 'https://rapid2ai-ingestion.sbarteau2022.workers.dev', health: '/',      kind: 'rapid' },
+  { key: 'rapid2ai-ingest', label: 'rapid2ai-ingest',  url: 'https://rapid2ai-ingestion.sbarteau2022.workers.dev', health: '/health', kind: 'rapid' },
 ];
 
 export const FACES: FaceTarget[] = [
