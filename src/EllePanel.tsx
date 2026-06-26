@@ -33,6 +33,41 @@ const TOOLS: [string, string][] = [
 
 type Turn = { q: string; answer: string; trace: any[]; open: boolean; pending: boolean }
 
+// RAPID²AI workers answer through the tool-using /query endpoint, which returns
+// a structured { intro, blocks, provenance } payload instead of elle-router's
+// { answer, trace }. Flatten the blocks to readable text so the same chat
+// surface renders both backends, and map provenance → the tool-trace shape.
+function rapidAnswer(d: any): string {
+  const parts: string[] = []
+  if (d.intro) parts.push(String(d.intro))
+  for (const b of d.blocks || []) {
+    if (!b || typeof b !== 'object') continue
+    if (b.type === 'prose' && typeof b.body === 'string') parts.push(b.body)
+    else if (b.type === 'kpi') parts.push((b.items || []).map((it: any) => `${it.label}: ${it.value}${it.delta ? ` (${it.delta.text})` : ''}`).join('   ·   '))
+    else if (b.type === 'table') {
+      const cols = b.columns || []
+      const head = cols.map((c: any) => c.label).join(' | ')
+      const rows = (b.rows || []).map((r: any) => cols.map((c: any) => {
+        let v = r[c.key]
+        if (v == null) v = '—'
+        else if (c.format === 'currency' && typeof v === 'number') v = '$' + v.toFixed(2)
+        return v
+      }).join(' | '))
+      parts.push([b.title, head, ...rows].filter(Boolean).join('\n'))
+    } else if (b.type === 'alerts') {
+      parts.push([b.title, ...(b.items || []).map((it: any) => `• ${it.text}`)].filter(Boolean).join('\n'))
+    }
+  }
+  return parts.join('\n\n') || d.content || d.response || '(no answer)'
+}
+function rapidTrace(d: any): any[] {
+  return (d.provenance || []).map((p: any) => ({
+    tool: p.tool,
+    args: p.args || {},
+    result: (p.sql ? p.sql + '\n' : '') + `${p.row_count ?? 0} row(s)` + (p.note ? `\n${p.note}` : ''),
+  }))
+}
+
 export default function EllePanel({ worker, accent }: any) {
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
@@ -40,6 +75,7 @@ export default function EllePanel({ worker, accent }: any) {
   const [showTools, setShowTools] = useState(false)
   const [note, setNote] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
+  const isRapid = worker.kind === 'rapid'
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [turns])
 
@@ -50,15 +86,21 @@ export default function EllePanel({ worker, accent }: any) {
     const idx = turns.length
     setTurns(t => [...t, { q: question, answer: '', trace: [], open: false, pending: true }])
     try {
-      const r = await fetch(worker.url + '/api/elle-router', {
+      // RAPID worker → tool-using /query (no auth); elle worker → /api/elle-router (Bearer JWT).
+      const url = isRapid ? worker.url + '/query' : worker.url + '/api/elle-router'
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (!isRapid) headers.Authorization = `Bearer ${tok()}`
+      const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` },
-        body: JSON.stringify({ q: question }),
+        headers,
+        body: JSON.stringify(isRapid ? { question } : { q: question }),
       })
       const d = await r.json()
       if (!r.ok || d.error) setNote(d.error || `HTTP ${r.status}`)
+      const answer = isRapid ? rapidAnswer(d) : (d.answer || '(no answer)')
+      const trace = isRapid ? rapidTrace(d) : (d.trace || [])
       setTurns(t => t.map((x, i) => i === idx
-        ? { ...x, answer: d.answer || '(no answer)', trace: d.trace || [], pending: false } : x))
+        ? { ...x, answer, trace, pending: false } : x))
     } catch (e: any) {
       setNote('Error: ' + (e.message || e))
       setTurns(t => t.map((x, i) => i === idx ? { ...x, answer: '(request failed)', pending: false } : x))
@@ -68,13 +110,15 @@ export default function EllePanel({ worker, accent }: any) {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 14, gap: 10, overflow: 'hidden' }}>
-      {/* tool inventory */}
+      {/* tool inventory — elle-router only; the RAPID worker runs its own SQL tool set */}
       <div>
         <button onClick={() => setShowTools(s => !s)}
           style={{ background: 'none', border: 'none', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10.5, cursor: 'pointer', padding: 0 }}>
-          {(showTools ? '▾ ' : '▸ ') + '16 tools she can reach'}
+          {isRapid
+            ? '▸ RAPID²AI · tool-using cost/POS intelligence'
+            : (showTools ? '▾ ' : '▸ ') + '16 tools she can reach'}
         </button>
-        {showTools && (
+        {showTools && !isRapid && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
             {TOOLS.map(([name, desc]) => (
               <span key={name} title={desc}
@@ -92,7 +136,9 @@ export default function EllePanel({ worker, accent }: any) {
       <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
         {turns.length === 0 && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 11, textAlign: 'center', padding: 20, lineHeight: 1.6 }}>
-            one window · chat, the corpus, D1, the live web, the code engine, trading, RAPID²AI, and the Optimus journal — she picks the tools and cross-references across them
+            {isRapid
+              ? 'RAPID²AI · ask about food cost, sales, invoice variance, purveyor price moves, vendors, menu items, pars — it runs the SQL tools and shows the provenance'
+              : 'one window · chat, the corpus, D1, the live web, the code engine, trading, RAPID²AI, and the Optimus journal — she picks the tools and cross-references across them'}
           </div>
         )}
         {turns.map((t, i) => (
@@ -122,7 +168,7 @@ export default function EllePanel({ worker, accent }: any) {
       {/* input */}
       <div style={{ display: 'flex', gap: 8 }}>
         <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') ask() }}
-          placeholder="ask Elle anything — she reaches the corpus, D1, the web, code, trading, the journal…"
+          placeholder={isRapid ? 'ask RAPID²AI — food cost, sales, variance, vendors, pars…' : 'ask Elle anything — she reaches the corpus, D1, the web, code, trading, the journal…'}
           style={{ flex: 1, background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '10px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
         <button onClick={ask} disabled={loading || !q.trim()}
           style={{ padding: '6px 16px', borderRadius: 5, border: `0.5px solid ${accent}55`, background: accent + '22', color: accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}>
