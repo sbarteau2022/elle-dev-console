@@ -155,16 +155,20 @@ export default function OptimusPanel({ worker }: any) {
     } catch (e: any) { setNote('Could not load thread: ' + (e.message || e)) }
   }, [worker])
 
-  useEffect(() => {
-    if ((window as any).Plotly) setPlotReady(true)
-    else { const s = document.createElement('script'); s.src = PLOTLY; s.onload = () => setPlotReady(true); document.body.appendChild(s) }
+  const loadThreadList = useCallback(() => {
     api('list').then(d => {
       const ts: Thread[] = d.threads || []
       setThreads(ts)
-      if (ts.length) setCur(ts[0].id)
-      else setNote('No journal threads yet. Fire the optimus cron (job:"optimus") or post a reader entry below, then reopen.')
+      if (ts.length) { setCur(c => c && ts.find(t => t.id === c) ? c : ts[0].id); setNote('') }
+      else setNote('No journal threads yet. Write the first entry below to begin.')
     }).catch(e => setNote('Could not load journal: ' + (e.message || e)))
-  }, [])
+  }, [worker])
+
+  useEffect(() => {
+    if ((window as any).Plotly) setPlotReady(true)
+    else { const s = document.createElement('script'); s.src = PLOTLY; s.onload = () => setPlotReady(true); document.body.appendChild(s) }
+    loadThreadList()
+  }, [loadThreadList])
 
   useEffect(() => { if (cur) loadThread(cur) }, [cur, loadThread])
 
@@ -186,9 +190,22 @@ export default function OptimusPanel({ worker }: any) {
   }, [screen, plotReady, entries])
 
   const post = async () => {
-    const txt = compose.trim(); if (!txt || busy || !cur) return
+    const txt = compose.trim(); if (!txt || busy) return
     setBusy(true)
-    try { await api('write', { role: 'reader', thread_id: cur, content: txt, off_record: offNext }); setCompose(''); setOffNext(false); await loadThread(cur) }
+    try {
+      const body: any = { role: 'reader', content: txt, off_record: offNext }
+      if (cur) body.thread_id = cur
+      const d = await api('write', body)
+      setCompose(''); setOffNext(false)
+      const tid = d.thread_id || cur
+      if (tid && tid !== cur) {
+        setCur(tid)
+        await loadThreadList()
+      } else if (cur) {
+        await loadThread(cur)
+      }
+      setNote('')
+    }
     catch (e: any) { setNote('post failed: ' + (e.message || e)) } finally { setBusy(false) }
   }
   const invite = async () => {
@@ -287,20 +304,18 @@ export default function OptimusPanel({ worker }: any) {
                     {!entries.length && <div className="empty">No entries yet — write the first one below.</div>}
                   </div>
                 )}
-                {!note && (
-                  <div className="compose">
+                <div className="compose">
                     <div className="compose-in">
                       <textarea value={compose} onChange={ev => setCompose(ev.target.value)} placeholder="Write to Elle…" />
                       <div className="crow">
                         <label className="ortog"><input type="checkbox" checked={offNext} onChange={ev => setOffNext(ev.target.checked)} /> off-record (she won't read it)</label>
                         <div className="cbtns">
-                          <button className="btn ghost" onClick={invite} disabled={busy || !cur}>{busy ? '…' : 'Invite Elle to respond'}</button>
-                          <button className="btn solid" onClick={post} disabled={busy || !compose.trim()}>Post entry</button>
+                          <button className="btn ghost" onClick={invite} disabled={busy || !cur}>{busy ? '…' : 'Invite Elle'}</button>
+                          <button className="btn solid" onClick={post} disabled={busy || !compose.trim()}>{busy ? '…' : 'Post entry'}</button>
                         </div>
                       </div>
                     </div>
                   </div>
-                )}
               </div>
             </div>
           )}
