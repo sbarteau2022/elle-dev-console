@@ -204,41 +204,125 @@ export default function App() {
   )
 }
 
-// ── CODE ENGINE ───────────────────────────────────────────────
-function CodePanel({ worker, accent }: any) {
-  const [action, setAction] = useState('analyze')
-  const [code, setCode] = useState('')
-  const [task, setTask] = useState('')
-  const [out, setOut] = useState('')
-  const [loading, setLoading] = useState(false)
+// ── CODE SANDBOX ─────────────────────────────────────────────
+// Extract the first fenced code block from Elle's response.
+function extractCode(text: string): string | null {
+  const m = text.match(/```(?:\w+)?\n([\s\S]*?)```/)
+  return m ? m[1].trimEnd() : null
+}
 
-  const run = async () => {
-    if (loading) return; setLoading(true); setOut('')
+function CodePanel({ worker, accent }: any) {
+  const [lang, setLang]       = useState('typescript')
+  const [action, setAction]   = useState('debug')
+  const [code, setCode]       = useState('')
+  const [context, setContext] = useState('')
+  const [out, setOut]         = useState('')
+  const [fixed, setFixed]     = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [history, setHistory] = useState<{ action: string; snapshot: string }[]>([])
+
+  const run = async (overrideAction?: string) => {
+    const act = overrideAction || action
+    if (loading) return; setLoading(true); setOut(''); setFixed(null)
     try {
       const r = await fetch(worker.url + '/api/elle-code-engine', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
-        body: JSON.stringify({ action, code, task, use_corpus: true }),
+        body: JSON.stringify({ action: act, code, language: lang, task: context, use_corpus: true }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
-      setOut((d.thinking ? '◢ reasoning\n' + d.thinking + '\n\n◣ output\n' : '') + (d.response || '(empty)'))
+      const raw = (d.thinking ? '◢ reasoning\n' + d.thinking + '\n\n◣ output\n' : '') + (d.response || '(empty)')
+      setOut(raw)
+      const extracted = extractCode(d.response || '')
+      if (extracted) setFixed(extracted)
     } catch (e: any) { setOut('Error: ' + (e.message || e)) } finally { setLoading(false) }
   }
 
+  const applyFix = () => {
+    if (!fixed) return
+    setHistory(h => [...h, { action, snapshot: code }])
+    setCode(fixed)
+    setFixed(null)
+    setOut('')
+  }
+
+  const undo = () => {
+    const last = history[history.length - 1]
+    if (!last) return
+    setCode(last.snapshot)
+    setHistory(h => h.slice(0, -1))
+  }
+
+  const BTN = (label: string, act: string, col?: string) => (
+    <button key={act} onClick={() => run(act)} disabled={loading || (!code.trim() && act !== 'generate')}
+      style={{ padding: '5px 11px', borderRadius: 5, border: `0.5px solid ${(col || accent)}55`, background: (col || accent) + '18',
+        color: col || accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10.5, whiteSpace: 'nowrap' }}>
+      {loading && action === act ? '…' : label}
+    </button>
+  )
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 14, gap: 10, overflow: 'auto' }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <select value={action} onChange={e => setAction(e.target.value)} style={{ background: 'var(--raised)', color: 'var(--t1)', border: '0.5px solid var(--b1)', borderRadius: 5, padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 11 }}>
-          {['analyze','generate','debug','refactor','explain','migrate'].map(a => <option key={a} value={a}>{a}</option>)}
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', gap: 0 }}>
+      {/* toolbar */}
+      <div style={{ padding: '8px 12px', borderBottom: '0.5px solid var(--b1)', background: 'var(--base)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <select value={lang} onChange={e => setLang(e.target.value)}
+          style={{ background: 'var(--raised)', color: 'var(--t2)', border: '0.5px solid var(--b1)', borderRadius: 5, padding: '5px 8px', fontFamily: 'var(--mono)', fontSize: 10.5 }}>
+          {['typescript','javascript','python','sql','bash','json','css','html'].map(l => <option key={l}>{l}</option>)}
         </select>
-        <button onClick={run} disabled={loading} style={{ padding: '6px 16px', borderRadius: 5, border: `0.5px solid ${accent}55`, background: accent + '22', color: accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11 }}>{loading ? 'running…' : 'run ▸'}</button>
-        <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t4)', alignSelf: 'center' }}>{worker.label}</span>
+        {BTN('analyze', 'analyze')}
+        {BTN('debug', 'debug', '#F59E0B')}
+        {BTN('refactor', 'refactor', '#8B5CF6')}
+        {BTN('explain', 'explain', '#10B981')}
+        {BTN('generate', 'generate', '#3B82F6')}
+        {BTN('migrate → D1', 'migrate', '#EC4899')}
+        {history.length > 0 && (
+          <button onClick={undo} style={{ padding: '5px 9px', borderRadius: 5, border: '0.5px solid var(--b1)', background: 'transparent', color: 'var(--t3)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10.5 }}>↩ undo</button>
+        )}
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t4)' }}>{worker.label}</span>
       </div>
-      <input value={task} onChange={e => setTask(e.target.value)} placeholder="task / instruction"
-        style={{ background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '8px 12px', fontSize: 12, fontFamily: 'var(--mono)', outline: 'none' }} />
-      <textarea value={code} onChange={e => setCode(e.target.value)} placeholder="paste code (optional for generate)…" rows={8}
-        style={{ background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 6, color: 'var(--t1)', padding: '10px 12px', fontSize: 12, fontFamily: 'var(--mono)', resize: 'vertical', outline: 'none' }} />
-      <pre style={{ flex: 1, background: 'var(--base)', border: '0.5px solid var(--b1)', borderRadius: 6, padding: 12, fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--t2)', whiteSpace: 'pre-wrap', overflow: 'auto', minHeight: 120, lineHeight: 1.6 }}>{out || '(output appears here)'}</pre>
+
+      {/* main: editor + output side by side */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+        {/* editor pane */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '0.5px solid var(--b1)', minWidth: 0 }}>
+          <div style={{ padding: '6px 10px', borderBottom: '0.5px solid var(--b1)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t3)', background: 'var(--base)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>editor · {lang}</span>
+            {code && <button onClick={() => setCode('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--t4)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10 }}>clear</button>}
+          </div>
+          <textarea value={code} onChange={e => { setCode(e.target.value); setAction('debug') }}
+            placeholder={'// paste or write code here\n// Elle will debug, refactor, explain, or generate\n// use the buttons above to run'}
+            spellCheck={false}
+            style={{ flex: 1, background: 'var(--void)', border: 'none', color: '#C8D3E0', padding: '12px 14px', fontSize: 12.5, fontFamily: 'var(--mono)', resize: 'none', outline: 'none', lineHeight: 1.6, tabSize: 2 }}
+            onKeyDown={e => { if (e.key === 'Tab') { e.preventDefault(); const s = e.currentTarget; const v = s.value; const i = s.selectionStart; s.value = v.slice(0, i) + '  ' + v.slice(s.selectionEnd); s.selectionStart = s.selectionEnd = i + 2; setCode(s.value) } }}
+          />
+          <div style={{ padding: '6px 10px', borderTop: '0.5px solid var(--b1)', background: 'var(--base)' }}>
+            <input value={context} onChange={e => setContext(e.target.value)}
+              placeholder="context · error message, goal, or constraint (optional)"
+              style={{ width: '100%', background: 'var(--raised)', border: '0.5px solid var(--b1)', borderRadius: 5, color: 'var(--t1)', padding: '6px 10px', fontSize: 11.5, fontFamily: 'var(--mono)', outline: 'none' }} />
+          </div>
+        </div>
+
+        {/* output pane */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <div style={{ padding: '6px 10px', borderBottom: '0.5px solid var(--b1)', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t3)', background: 'var(--base)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>elle · output</span>
+            {fixed && (
+              <button onClick={applyFix}
+                style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 4, border: `0.5px solid ${accent}88`, background: accent + '22', color: accent, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600 }}>
+                ← apply fix
+              </button>
+            )}
+          </div>
+          <pre style={{ flex: 1, background: 'var(--base)', border: 'none', padding: '12px 14px', fontSize: 11.5, fontFamily: 'var(--mono)', color: 'var(--t2)', whiteSpace: 'pre-wrap', overflow: 'auto', lineHeight: 1.6, margin: 0 }}>
+            {loading ? 'elle is thinking…' : (out || '(run an action to see output)')}
+          </pre>
+          {fixed && !loading && (
+            <div style={{ padding: '6px 10px', borderTop: '0.5px solid var(--b1)', background: 'var(--raised)', fontFamily: 'var(--mono)', fontSize: 10, color: accent }}>
+              ✓ fixed code detected — click "← apply fix" to load it into the editor
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
