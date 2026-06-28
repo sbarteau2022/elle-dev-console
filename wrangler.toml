@@ -1,0 +1,9 @@
+name = "elle-dev-console"
+compatibility_date = "2024-09-23"
+
+# Cloudflare Pages: build this Vite SPA and serve the compiled output.
+# Without this, Pages defaults to serving the repo root — where the only
+# index.html points at /src/main.tsx (raw TSX the browser can't run), which
+# surfaces as a 404 / blank page. The build command stays in the dashboard
+# (or framework auto-detect): `npm run build`.
+pages_build_output_dir = "dist"
