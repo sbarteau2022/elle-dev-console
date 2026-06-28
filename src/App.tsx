@@ -12,7 +12,8 @@ import OptimusPanel from './OptimusPanel'
 
 // Auth: per-user JWT obtained at runtime via /api/elle-auth (Login screen below).
 // No service key in the bundle. Token persists in localStorage (30-day expiry).
-const ELLE_AUTH_URL = WORKERS.find(w => w.key === 'elle-worker')!.url + '/api/elle-auth'
+const ELLE_WORKER_URL = WORKERS.find(w => w.key === 'elle-worker')!.url
+const ELLE_AUTH_URL = ELLE_WORKER_URL + '/api/elle-auth'
 let TOKEN = localStorage.getItem('elle_dev_jwt') || ''
 let USER_EMAIL = localStorage.getItem('elle_dev_email') || ''
 function setAuth(token: string, email: string) {
@@ -225,7 +226,9 @@ function CodePanel({ worker, accent }: any) {
     const act = overrideAction || action
     if (loading) return; setLoading(true); setOut(''); setFixed(null)
     try {
-      const r = await fetch(worker.url + '/api/elle-code-engine', {
+      // Code engine is an elle-worker capability — pin to it so the tab stays
+      // actionable even when a RAPID face is the active target.
+      const r = await fetch(ELLE_WORKER_URL + '/api/elle-code-engine', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
         body: JSON.stringify({ action: act, code, language: lang, task: context, use_corpus: true }),
       })
@@ -278,7 +281,7 @@ function CodePanel({ worker, accent }: any) {
         {history.length > 0 && (
           <button onClick={undo} style={{ padding: '5px 9px', borderRadius: 5, border: '0.5px solid var(--b1)', background: 'transparent', color: 'var(--t3)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 10.5 }}>↩ undo</button>
         )}
-        <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t4)' }}>{worker.label}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t4)' }}>elle-worker · code engine</span>
       </div>
 
       {/* main: editor + output side by side */}
@@ -337,7 +340,8 @@ function DiagnosePanel({ worker, accent }: any) {
   const run = async () => {
     if (loading || !err.trim()) return; setLoading(true); setOut('')
     try {
-      const r = await fetch(worker.url + '/api/diagnose', {
+      // Diagnose lives on the elle-worker — pin to it regardless of active face.
+      const r = await fetch(ELLE_WORKER_URL + '/api/diagnose', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
         body: JSON.stringify({ error: err }),
       })
