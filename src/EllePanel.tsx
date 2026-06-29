@@ -77,6 +77,20 @@ export default function EllePanel({ worker, accent }: any) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const isRapid = worker.kind === 'rapid'
 
+  // Stable chat session so the router remembers the conversation across turns
+  // (it loads prior turns + persists each exchange keyed on session_id). Without
+  // it every message is standalone and follow-ups like "tell me more" lose context.
+  const [sessionId, setSessionId] = useState(() => {
+    let s = localStorage.getItem('elle_dev_chat_session')
+    if (!s) { s = (crypto.randomUUID?.() || `s_${Date.now()}_${Math.random().toString(36).slice(2)}`); localStorage.setItem('elle_dev_chat_session', s) }
+    return s
+  })
+  const newConversation = () => {
+    const s = crypto.randomUUID?.() || `s_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    localStorage.setItem('elle_dev_chat_session', s)
+    setSessionId(s); setTurns([]); setNote('')
+  }
+
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [turns])
 
   const ask = async () => {
@@ -93,7 +107,7 @@ export default function EllePanel({ worker, accent }: any) {
       const r = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(isRapid ? { question } : { q: question }),
+        body: JSON.stringify(isRapid ? { question } : { q: question, session_id: sessionId }),
       })
       const d = await r.json()
       if (!r.ok || d.error) setNote(d.error || `HTTP ${r.status}`)
@@ -112,12 +126,20 @@ export default function EllePanel({ worker, accent }: any) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 14, gap: 10, overflow: 'hidden' }}>
       {/* tool inventory — elle-router only; the RAPID worker runs its own SQL tool set */}
       <div>
-        <button onClick={() => setShowTools(s => !s)}
-          style={{ background: 'none', border: 'none', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10.5, cursor: 'pointer', padding: 0 }}>
-          {isRapid
-            ? '▸ RAPID²AI · tool-using cost/POS intelligence'
-            : (showTools ? '▾ ' : '▸ ') + '16 tools she can reach'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setShowTools(s => !s)}
+            style={{ background: 'none', border: 'none', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10.5, cursor: 'pointer', padding: 0 }}>
+            {isRapid
+              ? '▸ RAPID²AI · tool-using cost/POS intelligence'
+              : (showTools ? '▾ ' : '▸ ') + '16 tools she can reach'}
+          </button>
+          {!isRapid && turns.length > 0 && (
+            <button onClick={newConversation} title="Start a fresh conversation (clears her memory of this thread)"
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 10.5, cursor: 'pointer', padding: 0 }}>
+              ↺ new conversation
+            </button>
+          )}
+        </div>
         {showTools && !isRapid && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
             {TOOLS.map(([name, desc]) => (
