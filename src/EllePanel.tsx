@@ -8,6 +8,7 @@
 // collapsible so you can watch which sources she hit.
 // ============================================================
 import { useState, useRef, useEffect } from 'react'
+import KappaHeader, { type KappaDynamics } from './KappaHeader'
 
 const tok = () => localStorage.getItem('elle_dev_jwt') || ''
 
@@ -74,6 +75,7 @@ export default function EllePanel({ worker, accent }: any) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [showTools, setShowTools] = useState(false)
   const [note, setNote] = useState('')
+  const [dyn, setDyn] = useState<KappaDynamics>(null)  // live κ readout, per turn
   const scrollRef = useRef<HTMLDivElement>(null)
   const isRapid = worker.kind === 'rapid'
 
@@ -88,7 +90,7 @@ export default function EllePanel({ worker, accent }: any) {
   const newConversation = () => {
     const s = crypto.randomUUID?.() || `s_${Date.now()}_${Math.random().toString(36).slice(2)}`
     localStorage.setItem('elle_dev_chat_session', s)
-    setSessionId(s); setTurns([]); setNote('')
+    setSessionId(s); setTurns([]); setNote(''); setDyn(null)
   }
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [turns])
@@ -113,6 +115,9 @@ export default function EllePanel({ worker, accent }: any) {
       if (!r.ok || d.error) setNote(d.error || `HTTP ${r.status}`)
       const answer = isRapid ? rapidAnswer(d) : (d.answer || '(no answer)')
       const trace = isRapid ? rapidTrace(d) : (d.trace || [])
+      // κ dynamics ride along on the elle-worker chat response (output-only, dt=1).
+      // The RAPID worker doesn't compute them, so leave the readout as-is there.
+      if (!isRapid && d.kappa_dynamics !== undefined) setDyn(d.kappa_dynamics as KappaDynamics)
       setTurns(t => t.map((x, i) => i === idx
         ? { ...x, answer, trace, pending: false } : x))
     } catch (e: any) {
@@ -153,6 +158,9 @@ export default function EllePanel({ worker, accent }: any) {
       </div>
 
       {note && <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--t3)' }}>{note}</div>}
+
+      {/* discrete coherence readout — sits above the conversation, updates per turn */}
+      {!isRapid && <KappaHeader dyn={dyn} />}
 
       {/* conversation */}
       <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>

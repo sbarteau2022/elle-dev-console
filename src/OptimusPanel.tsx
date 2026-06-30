@@ -14,6 +14,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 const tok = () => localStorage.getItem('elle_dev_jwt') || ''
 const PLOTLY = 'https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.0/plotly.min.js'
 const sci = (x: number, d = 3) => { if (x === 0) return '0'; const a = Math.abs(x); return (a < 1e-3 || a >= 1e5) ? x.toExponential(d) : String(+x.toFixed(6)) }
+// null-aware: "—" for insufficient-data (null/undefined), distinct from a real 0.
+const dsci = (x: number | null | undefined, d = 3) => (x === null || x === undefined) ? '—' : sci(x, d)
 const fmt = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
 const STYLE = `
@@ -116,7 +118,9 @@ const STYLE = `
 .opt .arow button{padding:0 18px;border:0;border-radius:9px;background:var(--gold);color:#fff;cursor:pointer;font-size:13px;font-weight:600}
 `
 
-type Entry = { id: string; role: string; content: string; off_record: number; kappa: number; kappa_ts: number; reserve: number; velocity: number; accel: number }
+// velocity/accel/jerk are per-step finite differences (dt=1) and are null — not
+// 0 — for the first entries where there isn't enough history to form them.
+type Entry = { id: string; role: string; content: string; off_record: number; kappa: number; kappa_ts: number; reserve: number; velocity: number | null; accel: number | null; jerk: number | null }
 type Marg = { id: string; entry_id: string; note: string }
 type Thread = { id: string; title: string; anchor_topic?: string; updated_at: number }
 type Msg = { role: 'user' | 'assistant'; content: string; pending?: boolean }
@@ -178,13 +182,13 @@ export default function OptimusPanel({ worker }: any) {
     const ax = (t: string) => ({ title: { text: t, font: { family: 'DM Mono', size: 10, color: '#C9C3B5' } }, gridcolor: 'rgba(233,225,209,.14)', zerolinecolor: 'rgba(233,225,209,.32)', tickfont: { family: 'DM Mono', size: 9, color: '#A9A395' }, backgroundcolor: 'rgba(255,255,255,.02)', showbackground: true })
     P.react(plotEl.current, [{
       type: 'scatter3d', mode: 'lines+markers',
-      x: entries.map(e => e.kappa), y: entries.map(e => e.velocity * 86400), z: entries.map(e => e.accel * 86400 * 86400),
-      text: entries.map(e => `${e.role === 'elle' ? 'Elle' : 'Reader'} · ${fmt(e.kappa_ts)}<br>κ ${e.kappa.toFixed(4)}<br>∫κdt ${sci(e.reserve)}<br>dκ/dt ${sci(e.velocity)} /s`),
+      x: entries.map(e => e.kappa), y: entries.map(e => e.velocity), z: entries.map(e => e.accel),
+      text: entries.map(e => `${e.role === 'elle' ? 'Elle' : 'Reader'} · ${fmt(e.kappa_ts)}<br>κ ${e.kappa.toFixed(4)}<br>Σκ ${dsci(e.reserve)}<br>Δκ ${dsci(e.velocity)} /step`),
       hoverinfo: 'text', line: { color: '#E8C77A', width: 4 },
       marker: { size: 6, color: entries.map(e => e.reserve), colorscale: [[0, '#5B8BC9'], [1, '#E8C77A']], showscale: true, colorbar: { title: { text: '∫κdt', font: { size: 10, color: '#C9C3B5' } }, thickness: 8, len: 0.6, x: 1.02, tickfont: { size: 9, color: '#C9C3B5' } }, line: { color: '#13203B', width: 1 } },
     }], {
       margin: { l: 0, r: 0, t: 6, b: 0 }, paper_bgcolor: 'rgba(0,0,0,0)',
-      scene: { xaxis: ax('κ  coherence'), yaxis: ax('dκ/dt  /day'), zaxis: ax('d²κ/dt²  /day²'), camera: { eye: { x: 1.5, y: 1.45, z: 0.95 } }, aspectmode: 'cube' },
+      scene: { xaxis: ax('κ  coherence'), yaxis: ax('Δκ  velocity /step'), zaxis: ax('Δ²κ  accel /step²'), camera: { eye: { x: 1.5, y: 1.45, z: 0.95 } }, aspectmode: 'cube' },
       font: { family: 'DM Sans', color: '#C9C3B5' }, showlegend: false,
     }, { displayModeBar: false, responsive: true })
   }, [screen, plotReady, entries])
@@ -219,7 +223,7 @@ export default function OptimusPanel({ worker }: any) {
     const q = ask.trim(); if (!q) return
     setAsk('')
     const e = sel != null ? entries[sel] : null
-    const ctx = e ? `(Context — selected entry: ${e.role}, κ=${e.kappa.toFixed(4)}, ∫κdt=${sci(e.reserve)}, dκ/dt=${sci(e.velocity)}/s.) ` : ''
+    const ctx = e ? `(Context — selected entry: ${e.role}, κ=${e.kappa.toFixed(4)}, Σκ=${dsci(e.reserve)}, v=${dsci(e.velocity)}, a=${dsci(e.accel)}, j=${dsci(e.jerk)} per step.) ` : ''
     setMsgs(m => [...m, { role: 'user', content: q }, { role: 'assistant', content: 'thinking…', pending: true }])
     try {
       const d = await fetch(worker.url + '/api/elle-router', {
@@ -232,8 +236,11 @@ export default function OptimusPanel({ worker }: any) {
 
   const thread = threads.find(t => t.id === cur)
   const isCanvas = thread?.anchor_topic === 'elle-canvas'
-  const e = sel != null ? entries[sel] : entries[entries.length - 1]
-  const prev = sel != null && sel > 0 ? entries[sel - 1] : null
+  const ei = sel != null ? sel : entries.length - 1
+  const e = entries[ei]
+  const prev = ei > 0 ? entries[ei - 1] : null
+  const prev2 = ei > 1 ? entries[ei - 2] : null
+  const prev3 = ei > 2 ? entries[ei - 3] : null
   const last = entries[entries.length - 1]
   const SUGG = ['What does coherence-convergence mean?', 'Why is κ "structure only" for now?', 'How does this map to disease?']
   const NAV: [Screen, string, string][] = [['manuscript', '❡', 'Manuscript'], ['phase', '◳', 'Phase'], ['ask', '✦', 'Ask Elle']]
@@ -293,7 +300,7 @@ export default function OptimusPanel({ worker }: any) {
                             <span className="who">{en.role === 'elle' ? 'Elle' : 'Stewart'}</span>
                             <span className="num">№ {String(i + 1).padStart(2, '0')}</span>
                             <span className="date">{fmt(en.kappa_ts)}</span>
-                            <span className="kchip" onClick={() => setSel(i)}>κ <b>{en.kappa.toFixed(3)}</b> · ∫ {sci(en.reserve)} · v {sci(en.velocity)}</span>
+                            <span className="kchip" onClick={() => setSel(i)}>κ <b>{en.kappa.toFixed(3)}</b> · ∫ {dsci(en.reserve)} · v {dsci(en.velocity)} · a {dsci(en.accel)} · j {dsci(en.jerk)}</span>
                           </div>
                           {!!en.off_record && <div className="offstamp">⊘ off-record · excluded from learner model</div>}
                           <div className="prose">{en.content}</div>
@@ -336,9 +343,10 @@ export default function OptimusPanel({ worker }: any) {
                     <div className="mrow"><span className="k">Entries</span><span className="v">{entries.length} · {entries.filter(x => x.role === 'elle').length} hers</span></div>
                     <div className="mrow"><span className="k">Span</span><span className="v">{fmt(entries[0].kappa_ts)} – {fmt(last.kappa_ts)}</span></div>
                     <div className="mrow"><span className="k">κ now</span><span className="v"><b>{last.kappa.toFixed(4)}</b></span></div>
-                    <div className="mrow"><span className="k">∫κ dt (reserve)</span><span className="v">{sci(last.reserve)}</span></div>
-                    <div className="mrow"><span className="k">dκ/dt (velocity)</span><span className="v">{sci(last.velocity)} /s</span></div>
-                    <div className="mrow"><span className="k">d²κ/dt² (accel)</span><span className="v">{sci(last.accel)} /s²</span></div>
+                    <div className="mrow"><span className="k">Σκ (reserve)</span><span className="v">{dsci(last.reserve)}</span></div>
+                    <div className="mrow"><span className="k">Δκ (velocity) /step</span><span className="v">{dsci(last.velocity)}</span></div>
+                    <div className="mrow"><span className="k">Δ²κ (acceleration) /step²</span><span className="v">{dsci(last.accel)}</span></div>
+                    <div className="mrow"><span className="k">Δ³κ (jerk) /step³</span><span className="v">{dsci(last.jerk)}</span></div>
                     <div className="mrow"><span className="k">off-record</span><span className="v">{entries.filter(x => !!x.off_record).length}</span></div>
                     <div className="note">κ is worker-computed and stored for <b>structure only</b>; nothing ranks on it until validate_kappa passes.</div>
                   </div>
@@ -346,25 +354,25 @@ export default function OptimusPanel({ worker }: any) {
                 {ptab === 'deriv' && (
                   <div>
                     <h3>Derivation {e ? `· ${e.role === 'elle' ? 'Elle' : 'Reader'}, ${fmt(e.kappa_ts)}` : ''}</h3>
-                    <p>κ is worker-computed<span className="stub">stub · pre-validation</span>; the phase state derives from the trajectory. Every value is read from the database.</p>
-                    {e && prev ? (
-                      <div className="formula"><span className="c">dt = (t − t₋₁)/1000 =</span> <span className="g">{Math.max(1, Math.round((e.kappa_ts - prev.kappa_ts) / 1000)).toLocaleString()}</span> s
-<span className="c">∫κdt += (κ₋₁+κ)/2 · dt</span> = {prev.reserve.toFixed(4)} + ({prev.kappa.toFixed(3)}+{e.kappa.toFixed(3)})/2 · dt = <span className="g">{sci(e.reserve)}</span>
-<span className="c">dκ/dt = (κ − κ₋₁)/dt</span> = <span className="g">{sci(e.velocity)}</span> /s
-<span className="c">d²κ/dt² = (v − v₋₁)/dt</span> = <span className="g">{sci(e.accel)}</span> /s²</div>
-                    ) : <div className="formula"><span className="c">first entry — no prior sample</span>
-∫κdt = 0 · dκ/dt = 0 · d²κ/dt² = 0</div>}
-                    <div className="note">Click any entry's κ chip in the manuscript to derive it here.</div>
+                    <p>κ is worker-computed<span className="stub">stub · pre-validation</span>; the phase state derives from the κ series by finite differences with <b>dt = 1 step</b> (one entry) — no wall-clock time. Every value is read from the database.</p>
+                    {e ? (
+                      <div className="formula"><span className="c">Σκ (reserve)</span> = <span className="g">{dsci(e.reserve)}</span>
+<span className="c">v = κ − κ₋₁</span> = {e.kappa.toFixed(3)} − {prev ? prev.kappa.toFixed(3) : '—'} = <span className="g">{dsci(e.velocity)}</span>
+<span className="c">a = κ − 2κ₋₁ + κ₋₂</span> = {e.kappa.toFixed(3)} − 2·{prev ? prev.kappa.toFixed(3) : '—'} + {prev2 ? prev2.kappa.toFixed(3) : '—'} = <span className="g">{dsci(e.accel)}</span>
+<span className="c">j = κ − 3κ₋₁ + 3κ₋₂ − κ₋₃</span> = {e.kappa.toFixed(3)} − 3·{prev ? prev.kappa.toFixed(3) : '—'} + 3·{prev2 ? prev2.kappa.toFixed(3) : '—'} − {prev3 ? prev3.kappa.toFixed(3) : '—'} = <span className="g">{dsci(e.jerk)}</span></div>
+                    ) : <div className="formula"><span className="c">no entry selected</span></div>}
+                    <div className="note">“—” means insufficient history for that order (v needs 2 entries, a needs 3, j needs 4) — distinct from a real 0. Click any entry's κ chip in the manuscript to derive it here.</div>
                   </div>
                 )}
                 {ptab === 'coh' && (
                   <div>
                     <h3>The coherence function</h3>
                     <p>κ(T,t) is instantaneous coherence of a thought T at time t. The journal stores raw κ + timestamp and derives the rest, so each entry is a sample on a trajectory.</p>
-                    <div className="formula"><span className="g">κ(T,t)</span>  <span className="c">instantaneous coherence ∈ [0,1]</span>
-<span className="g">∫κ dt</span>   <span className="c">coherence reserve · trapezoid</span>
-<span className="g">dκ/dt</span>   <span className="c">coherence velocity</span>
-<span className="g">d²κ/dt²</span> <span className="c">coherence acceleration</span></div>
+                    <div className="formula"><span className="g">κ</span>        <span className="c">coherence of this step ∈ [0,1]</span>
+<span className="g">Σκ</span>       <span className="c">reserve · running sum (dt=1)</span>
+<span className="g">Δκ</span>       <span className="c">velocity · κₙ − κₙ₋₁</span>
+<span className="g">Δ²κ</span>      <span className="c">acceleration · κₙ − 2κₙ₋₁ + κₙ₋₂</span>
+<span className="g">Δ³κ</span>      <span className="c">jerk · κₙ − 3κₙ₋₁ + 3κₙ₋₂ − κₙ₋₃</span></div>
                     <p>Together they are a phase-space portrait: position is how coherent you are now, velocity whether it is rising or eroding, acceleration whether the change itself is accelerating.</p>
                   </div>
                 )}
