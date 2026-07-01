@@ -32,7 +32,13 @@ export const FACES: FaceTarget[] = [
   { key: 'main',    label: 'main · core',   page: 'https://eip.pages.dev',       worker: 'elle-worker', accent: '#5FD6E8' },
   { key: 'law',     label: 'law · Anubis',  page: 'https://anubislaw.pages.dev',   worker: 'elle-worker', accent: '#C9A84C' },
   { key: 'edu',     label: 'edu · Atlas',   page: 'https://atlasedu.pages.dev',       worker: 'elle-worker', accent: '#4ADE80' },
-  { key: 'rapid',   label: 'rapid · Atlas', page: 'https://rapidai.pages.dev/coo/', worker: 'rapid2ai-ai', accent: '#22D3EE' },
+  // Default worker repointed at elle-worker: the RAPID hospitality tools
+  // (rapid_report/rapid_costs/rapid_variance/rapid_pos/rapid_menu) are now
+  // native router tools there (src/rapid.ts in elle-worker), running
+  // directly against rapid2ai-db instead of proxying through the standalone
+  // rapid2ai-ai-worker. The rapid2ai-ai worker/DB itself is untouched — this
+  // only changes which backend the console's own "rapid" panel talks to.
+  { key: 'rapid',   label: 'rapid · Atlas', page: 'https://rapidai.pages.dev/coo/', worker: 'elle-worker', accent: '#22D3EE' },
   { key: 'madmind', label: 'madmind',       page: 'https://madmind.pages.dev',       worker: 'elle-worker', accent: '#A78BFA' },
 ];
 
