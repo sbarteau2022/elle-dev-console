@@ -1,8 +1,9 @@
-name: Deploy Dev Console
+name: Deploy Dev Console (DEPRECATED — manual only)
 
+# The dev console is retired in favor of the local Elle workbench (the Elle
+# repo). No automatic deploys: this can only be run by hand, and exists only
+# until the Pages project is deleted.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
